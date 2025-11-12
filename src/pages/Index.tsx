@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Calendar, Tag, X, TrendingUp } from "lucide-react";
+import { BarChart3, Calendar, Tag, X, TrendingUp, Loader2 } from "lucide-react";
 import StatsCard from "@/components/StatsCard";
 import InsightCard from "@/components/InsightCard";
 import LeadsTable from "@/components/LeadsTable";
@@ -16,79 +16,62 @@ import {
   AreaChart,
   Area,
 } from "recharts";
-
-// Mock data
-const barChartData = [
-  { name: "BIO IGOR", value: 32 },
-  { name: "CR 17 | LEVA 1", value: 115 },
-  { name: "CR 6 | LEVA 1", value: 65 },
-  { name: "CR 2 | LEVA 1", value: 95 },
-];
-
-const lineChartData = [
-  { date: "01/09", value: 5 },
-  { date: "04/09", value: 18 },
-  { date: "07/09", value: 20 },
-  { date: "10/09", value: 21 },
-  { date: "13/09", value: 8 },
-  { date: "16/09", value: 24 },
-  { date: "19/09", value: 22 },
-  { date: "22/09", value: 19 },
-  { date: "25/09", value: 7 },
-  { date: "28/09", value: 3 },
-];
-
-const leadsData = [
-  {
-    id: "1",
-    name: "Fernanda Laryssa",
-    email: "felary2015@gmail.com",
-    phone: "34991118103",
-    potential: "até 50k",
-    expertise: "Outro",
-    tag: "BIO IGOR",
-    date: "03/11/2025 16:40",
-  },
-  {
-    id: "2",
-    name: "Luis Fernando",
-    email: "xluisaj@gmail.com",
-    phone: "87996793112",
-    potential: "+500k",
-    expertise: "Expert de aviator",
-    tag: "BIO IGOR",
-    date: "30/10/2025 02:14",
-  },
-  {
-    id: "3",
-    name: "João Silva",
-    email: "joao.silva@email.com",
-    phone: "11987654321",
-    potential: "até 100k",
-    expertise: "Expert de roleta",
-    tag: "CR 17 | LEVA 1",
-    date: "02/11/2025 14:22",
-  },
-  {
-    id: "4",
-    name: "Maria Santos",
-    email: "maria.s@email.com",
-    phone: "21976543210",
-    potential: "até 200k",
-    expertise: "Expert de roleta",
-    tag: "CR 17 | LEVA 1",
-    date: "01/11/2025 09:15",
-  },
-];
+import { 
+  useLeads, 
+  useLeadStats, 
+  useLeadsByTag, 
+  useDailyLeads,
+  useTotalPotential 
+} from "@/hooks/usePowerLPBR";
 
 const Index = () => {
   const [selectedPeriod, setSelectedPeriod] = useState("all");
   const [selectedTag, setSelectedTag] = useState("all");
 
+  // Buscar dados do Supabase
+  const { data: leads, isLoading: leadsLoading } = useLeads();
+  const { data: stats, isLoading: statsLoading } = useLeadStats();
+  const { data: tagData, isLoading: tagLoading } = useLeadsByTag();
+  const { data: dailyData, isLoading: dailyLoading } = useDailyLeads(30);
+  const { data: totalPotential, isLoading: potentialLoading } = useTotalPotential();
+
   const handleClearFilters = () => {
     setSelectedPeriod("all");
     setSelectedTag("all");
   };
+
+  // Formatar dados para os gráficos
+  const barChartData = tagData?.map(item => ({
+    name: item.tag,
+    value: item.count
+  })).slice(0, 10) || [];
+
+  const lineChartData = dailyData?.map(item => ({
+    date: item.date,
+    value: item.count
+  })) || [];
+
+  // Formatar potencial total
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
+  // Loading state
+  if (leadsLoading || statsLoading || tagLoading || dailyLoading || potentialLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Carregando dados...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
@@ -134,27 +117,24 @@ const Index = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard
             title="Total de Leads"
-            value="357"
+            value={stats?.totalLeads.toString() || "0"}
             subtitle="Leads captados"
-            trend={12}
           />
           <StatsCard
             title="Melhor Tag"
-            value="CR 17 | LEVA 1"
-            subtitle="115 leads"
+            value={stats?.bestTag.name || "N/A"}
+            subtitle={`${stats?.bestTag.count || 0} leads`}
             highlight
           />
           <StatsCard
             title="Potencial Total"
-            value="R$ 41.9M"
+            value={totalPotential ? formatCurrency(totalPotential) : "R$ 0"}
             subtitle="Faturamento estimado"
-            trend={8}
           />
           <StatsCard
             title="Pior Tag"
-            value="CR 2 | LEVA 1"
-            subtitle="3 leads"
-            trend={-5}
+            value={stats?.worstTag.name || "N/A"}
+            subtitle={`${stats?.worstTag.count || 0} leads`}
           />
         </div>
 
@@ -162,19 +142,19 @@ const Index = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <InsightCard
             title="TAG com mais Potencial"
-            value="CR 1 | LEVA 1"
-            subtitle="11 leads com valores altos"
+            value={stats?.bestTag.name || "N/A"}
+            subtitle={`${stats?.bestTag.count || 0} leads`}
             icon={<TrendingUp className="h-5 w-5" />}
           />
           <InsightCard
             title="Expertise mais atingida"
-            value="Expert de roleta"
-            subtitle="106 leads preenchidos"
+            value={stats?.topExpertise.name || "N/A"}
+            subtitle={`${stats?.topExpertise.count || 0} leads preenchidos`}
             icon={<TrendingUp className="h-5 w-5" />}
           />
           <InsightCard
             title="Média de Leads por Dia"
-            value="9.2"
+            value={stats?.averageLeadsPerDay.toString() || "0"}
             subtitle="diário"
             compact
           />
@@ -264,7 +244,7 @@ const Index = () => {
         {/* Leads Table */}
         <div className="space-y-4">
           <h3 className="text-2xl font-bold">Todos os Leads</h3>
-          <LeadsTable leads={leadsData} onDelete={(id) => console.log("Delete:", id)} />
+          <LeadsTable leads={leads || []} onDelete={(id) => console.log("Delete:", id)} />
         </div>
       </div>
     </div>

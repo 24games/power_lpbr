@@ -8,6 +8,8 @@ import {
 } from "@/components/ui/table";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PowerLPBR } from "@/types/power-lpbr";
+import { format, parseISO } from "date-fns";
 
 interface Lead {
   id: string;
@@ -21,11 +23,19 @@ interface Lead {
 }
 
 interface LeadsTableProps {
-  leads: Lead[];
-  onDelete?: (id: string) => void;
+  leads: PowerLPBR[];
+  onDelete?: (id: number) => void;
 }
 
 const LeadsTable = ({ leads, onDelete }: LeadsTableProps) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    try {
+      return format(parseISO(dateString), 'dd/MM/yyyy HH:mm');
+    } catch {
+      return 'N/A';
+    }
+  };
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <Table>
@@ -47,17 +57,17 @@ const LeadsTable = ({ leads, onDelete }: LeadsTableProps) => {
               key={lead.id}
               className={index % 2 === 0 ? "bg-card/50" : "bg-card"}
             >
-              <TableCell className="font-medium">{lead.name}</TableCell>
-              <TableCell className="text-muted-foreground">{lead.email}</TableCell>
-              <TableCell className="text-muted-foreground">{lead.phone}</TableCell>
-              <TableCell className="text-primary font-semibold">{lead.potential}</TableCell>
-              <TableCell className="text-muted-foreground">{lead.expertise}</TableCell>
+              <TableCell className="font-medium">{lead.nome || 'N/A'}</TableCell>
+              <TableCell className="text-muted-foreground">{lead.email || 'N/A'}</TableCell>
+              <TableCell className="text-muted-foreground">{lead.telefone || 'N/A'}</TableCell>
+              <TableCell className="text-primary font-semibold">{lead.fat_deposito || 'N/A'}</TableCell>
+              <TableCell className="text-muted-foreground">{lead.expertise || 'N/A'}</TableCell>
               <TableCell>
                 <span className="px-2 py-1 rounded text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                  {lead.tag}
+                  {lead.tag || 'Sem tag'}
                 </span>
               </TableCell>
-              <TableCell className="text-muted-foreground">{lead.date}</TableCell>
+              <TableCell className="text-muted-foreground">{formatDate(lead.created_at)}</TableCell>
               <TableCell className="text-right">
                 <Button
                   variant="ghost"
