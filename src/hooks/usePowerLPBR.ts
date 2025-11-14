@@ -1,17 +1,35 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { PowerLPBR, LeadStats, TagCount, DailyLeadCount } from '@/types/power-lpbr';
-import { format, subDays, parseISO } from 'date-fns';
+import { format, subDays, parseISO, startOfDay, endOfDay } from 'date-fns';
 
-// Buscar todos os leads
-export const useLeads = () => {
+// Buscar todos os leads com filtros opcionais
+export const useLeads = (filters?: { tag?: string; startDate?: Date; endDate?: Date }) => {
   return useQuery({
-    queryKey: ['power-lpbr-leads'],
+    queryKey: ['power-lpbr-leads', filters],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('power_lpbr')
         .select('*')
         .order('created_at', { ascending: false });
+
+      // Aplicar filtro de tag
+      if (filters?.tag && filters.tag !== 'all') {
+        query = query.eq('tag', filters.tag);
+      }
+
+      // Aplicar filtro de data
+      if (filters?.startDate) {
+        query = query.gte('created_at', startOfDay(filters.startDate).toISOString());
+      }
+      if (filters?.endDate) {
+        query = query.lte('created_at', endOfDay(filters.endDate).toISOString());
+      } else if (filters?.startDate) {
+        // Se só tem data inicial, vai até hoje
+        query = query.lte('created_at', endOfDay(new Date()).toISOString());
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return data as PowerLPBR[];
@@ -19,14 +37,72 @@ export const useLeads = () => {
   });
 };
 
-// Buscar estatísticas dos leads
-export const useLeadStats = () => {
-  return useQuery({
-    queryKey: ['power-lpbr-stats'],
-    queryFn: async () => {
-      const { data: leads, error } = await supabase
+// Hook para deletar um lead
+export const useDeleteLead = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase
         .from('power_lpbr')
-        .select('*');
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      // Invalidar queries para atualizar a lista
+      queryClient.invalidateQueries({ queryKey: ['power-lpbr-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['power-lpbr-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['power-lpbr-by-tag'] });
+      queryClient.invalidateQueries({ queryKey: ['power-lpbr-daily'] });
+      queryClient.invalidateQueries({ queryKey: ['power-lpbr-potential'] });
+    },
+  });
+};
+
+// Hook para obter lista única de tags
+export const useUniqueTags = () => {
+  return useQuery({
+    queryKey: ['power-lpbr-unique-tags'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('power_lpbr')
+        .select('tag');
+
+      if (error) throw error;
+
+      const leads = data as PowerLPBR[];
+      const uniqueTags = Array.from(new Set(leads.map(lead => lead.tag).filter(Boolean)));
+      return uniqueTags.sort();
+    },
+  });
+};
+
+// Buscar estatísticas dos leads com filtros
+export const useLeadStats = (filters?: { tag?: string; startDate?: Date; endDate?: Date }) => {
+  return useQuery({
+    queryKey: ['power-lpbr-stats', filters],
+    queryFn: async () => {
+      let query = supabase.from('power_lpbr').select('*');
+
+      // Aplicar filtro de tag
+      if (filters?.tag && filters.tag !== 'all') {
+        query = query.eq('tag', filters.tag);
+      }
+
+      // Aplicar filtro de data
+      if (filters?.startDate) {
+        query = query.gte('created_at', startOfDay(filters.startDate).toISOString());
+      }
+      if (filters?.endDate) {
+        query = query.lte('created_at', endOfDay(filters.endDate).toISOString());
+      } else if (filters?.startDate) {
+        // Se só tem data inicial, vai até hoje
+        query = query.lte('created_at', endOfDay(new Date()).toISOString());
+      }
+
+      const { data: leads, error } = await query;
 
       if (error) throw error;
 
@@ -89,14 +165,25 @@ export const useLeadStats = () => {
   });
 };
 
-// Buscar contagem de leads por tag
-export const useLeadsByTag = () => {
+// Buscar contagem de leads por tag com filtros
+export const useLeadsByTag = (filters?: { startDate?: Date; endDate?: Date }) => {
   return useQuery({
-    queryKey: ['power-lpbr-by-tag'],
+    queryKey: ['power-lpbr-by-tag', filters],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('power_lpbr')
-        .select('tag');
+      let query = supabase.from('power_lpbr').select('tag');
+
+      // Aplicar filtro de data (não filtra por tag aqui pois queremos ver todas as tags)
+      if (filters?.startDate) {
+        query = query.gte('created_at', startOfDay(filters.startDate).toISOString());
+      }
+      if (filters?.endDate) {
+        query = query.lte('created_at', endOfDay(filters.endDate).toISOString());
+      } else if (filters?.startDate) {
+        // Se só tem data inicial, vai até hoje
+        query = query.lte('created_at', endOfDay(new Date()).toISOString());
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -117,17 +204,27 @@ export const useLeadsByTag = () => {
   });
 };
 
-// Buscar evolução de leads nos últimos 30 dias
-export const useDailyLeads = (days: number = 30) => {
+// Buscar evolução de leads nos últimos 30 dias com filtros
+export const useDailyLeads = (days: number = 30, filters?: { tag?: string; startDate?: Date; endDate?: Date }) => {
   return useQuery({
-    queryKey: ['power-lpbr-daily', days],
+    queryKey: ['power-lpbr-daily', days, filters],
     queryFn: async () => {
-      const startDate = subDays(new Date(), days);
+      // Usar data do filtro ou calcular baseado nos dias
+      const calculatedStartDate = filters?.startDate || subDays(new Date(), days);
+      const calculatedEndDate = filters?.endDate || new Date();
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('power_lpbr')
         .select('created_at')
-        .gte('created_at', startDate.toISOString());
+        .gte('created_at', startOfDay(calculatedStartDate).toISOString())
+        .lte('created_at', endOfDay(calculatedEndDate).toISOString());
+
+      // Aplicar filtro de tag
+      if (filters?.tag && filters.tag !== 'all') {
+        query = query.eq('tag', filters.tag);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -144,8 +241,11 @@ export const useDailyLeads = (days: number = 30) => {
 
       // Criar array com todas as datas do período
       const result: DailyLeadCount[] = [];
-      for (let i = days - 1; i >= 0; i--) {
-        const date = subDays(new Date(), i);
+      const totalDays = Math.ceil((calculatedEndDate.getTime() - calculatedStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      for (let i = 0; i < totalDays; i++) {
+        const date = new Date(calculatedStartDate);
+        date.setDate(date.getDate() + i);
         const dateKey = format(date, 'dd/MM');
         result.push({
           date: dateKey,
@@ -158,14 +258,30 @@ export const useDailyLeads = (days: number = 30) => {
   });
 };
 
-// Calcular potencial total estimado
-export const useTotalPotential = () => {
+// Calcular potencial total estimado com filtros
+export const useTotalPotential = (filters?: { tag?: string; startDate?: Date; endDate?: Date }) => {
   return useQuery({
-    queryKey: ['power-lpbr-potential'],
+    queryKey: ['power-lpbr-potential', filters],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('power_lpbr')
-        .select('fat_deposito');
+      let query = supabase.from('power_lpbr').select('fat_deposito');
+
+      // Aplicar filtro de tag
+      if (filters?.tag && filters.tag !== 'all') {
+        query = query.eq('tag', filters.tag);
+      }
+
+      // Aplicar filtro de data
+      if (filters?.startDate) {
+        query = query.gte('created_at', startOfDay(filters.startDate).toISOString());
+      }
+      if (filters?.endDate) {
+        query = query.lte('created_at', endOfDay(filters.endDate).toISOString());
+      } else if (filters?.startDate) {
+        // Se só tem data inicial, vai até hoje
+        query = query.lte('created_at', endOfDay(new Date()).toISOString());
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -188,6 +304,75 @@ export const useTotalPotential = () => {
       }, 0);
 
       return totalPotential;
+    },
+  });
+};
+
+// Buscar estatísticas de status com filtros
+export const useStatusStats = (filters?: { tag?: string; startDate?: Date; endDate?: Date }) => {
+  return useQuery({
+    queryKey: ['power-lpbr-status-stats', filters],
+    queryFn: async () => {
+      let query = supabase.from('power_lpbr').select('status');
+
+      // Aplicar filtro de tag
+      if (filters?.tag && filters.tag !== 'all') {
+        query = query.eq('tag', filters.tag);
+      }
+
+      // Aplicar filtro de data
+      if (filters?.startDate) {
+        query = query.gte('created_at', startOfDay(filters.startDate).toISOString());
+      }
+      if (filters?.endDate) {
+        query = query.lte('created_at', endOfDay(filters.endDate).toISOString());
+      } else if (filters?.startDate) {
+        // Se só tem data inicial, vai até hoje
+        query = query.lte('created_at', endOfDay(new Date()).toISOString());
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      const leads = data as PowerLPBR[];
+
+      // Contar leads por status
+      const statusCounts = leads.reduce((acc, lead) => {
+        const status = lead.status || 'Sem status';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const totalLeads = leads.length;
+
+      // Definir cores para cada status
+      const statusColors: Record<string, string> = {
+        'LEADS CAPTADOS': '#3b82f6', // azul
+        'CONVERSAS INICIADAS': '#06b6d4', // ciano
+        'NÃO QUALIFICADOS': '#ef4444', // vermelho
+        'QUALIFICADOS': '#10b981', // verde
+        'AGENDADOS': '#8b5cf6', // roxo
+        'NOSHOW': '#f97316', // laranja escuro
+        'FOLLOWUP': '#f59e0b', // laranja
+        'FECHADOS': '#059669', // verde escuro
+        'EM OPERAÇÃO': '#14b8a6', // teal
+        'LEAD QUENTE DESCARTADO': '#dc2626', // vermelho escuro
+        'AFILIADOS QUE DESISTIRAM APÓS O FECHAMENTO': '#991b1b', // vermelho muito escuro
+        'Sem status': '#6b7280', // cinza
+      };
+
+      // Criar array de resultados
+      const result = Object.entries(statusCounts)
+        .map(([status, count]) => ({
+          status,
+          count,
+          percentage: totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0,
+          color: statusColors[status] || '#6b7280',
+        }))
+        .sort((a, b) => b.count - a.count);
+
+      return result;
     },
   });
 };
